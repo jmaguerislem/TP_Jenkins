@@ -48,10 +48,20 @@ pipeline {
         }
       }
     }
+
+    stage('Deploy') {
+      steps {
+        bat """
+          docker compose -p tp_jenkins pull
+          docker compose -p tp_jenkins up -d
+          docker ps
+        """
+      }
+    }
   }
 
   post {
-    success { echo 'Build+Test+Push OK' }
-    failure { echo 'Build/Tests/Push KO' }
+    success { echo 'Build+Test+Push+Deploy OK' }
+    failure { echo 'Build/Tests/Push/Deploy KO' }
   }
 }
