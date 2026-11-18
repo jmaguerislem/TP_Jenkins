@@ -1,76 +1,57 @@
 pipeline {
   agent any
   options { timestamps() }
+
+  environment {
+    PATH = "C:\\Users\\jmagu\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
+    // DOCKER_HOST = 'npipe:////./pipe/docker_engine'
+    IMAGE = 'islemjmaguer/monapp'
+    TAG   = "build-${env.BUILD_NUMBER}"
+  }
+
   stages {
-
-    stage('Cloner le dépôt') {
-      steps {
-        git url: 'https://github.com/jmaguerislem/TP_Jenkins.git', branch: 'main', credentialsId: 'github-token'
-      }
-    }
-
     stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Docker Build') {
       steps {
-        checkout scm
+        bat 'docker version'
+        bat "docker build -t %IMAGE%:%TAG% ."
       }
     }
 
-    stage('Étape 1 : Vérification du dépôt') {
+    stage('Smoke Test') {
       steps {
-        bat 'echo === Étape 1 : Vérification du dépôt ==='
-        bat 'git status'
+        bat """
+          docker rm -f monapp_test 2>nul || ver > nul
+          docker run -d --name monapp_test -p 8081:80 %IMAGE%:%TAG%
+          ping -n 4 127.0.0.1 > nul
+          curl -I http://localhost:8081 | find "200 OK"
+          if errorlevel 1 ( docker rm -f monapp_test & exit /b 1 )
+          docker rm -f monapp_test
+        """
       }
     }
 
-    stage('Étape 2 : Afficher le contenu du projet') {
+    stage('Push (Docker Hub)') {
       steps {
-        bat 'echo === Étape 2 : Afficher le contenu du projet ==='
-        bat 'dir'
-      }
-    }
-
-    stage('Build') {
-      steps {
-        bat 'echo === Build du projet ==='
-        bat 'dir'
-      }
-    }
-
-    stage('Test') {
-      steps {
-        bat 'echo === Verification des fichiers ==='
-        bat 'if not exist index.html exit 1'
-        bat 'if not exist style.css exit 1'
-        bat 'echo Tests OK'
-      }
-    }
-
-    stage('Étape 3 : Simuler un déploiement local') {
-      steps {
-        bat 'echo === Étape 3 : Simuler un déploiement local ==='
-        bat 'echo Le fichier index.html est prêt à être affiché'
-      }
-    }
-
-    stage('Deploy') {
-      steps {
-        bat 'echo === Deploy ==='
-        bat 'if not exist C:\\DevOps\\deploy mkdir C:\\DevOps\\deploy'
-        bat 'copy /Y index.html C:\\DevOps\\deploy\\'
-        bat 'copy /Y style.css C:\\DevOps\\deploy\\'
-        bat 'echo Deploiement termine dans C:\\DevOps\\deploy'
-      }
-    }
-
-    stage('Étape 4 : Fin du build') {
-      steps {
-        bat 'echo === Étape 4 : Fin du build ==='
-        bat 'echo SUCCESS'
+        withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
+                                          usernameVariable: 'USER',
+                                          passwordVariable: 'PASS')]) {
+          bat """
+            echo %PASS%| docker login -u %USER% --password-stdin
+            docker tag %IMAGE%:%TAG% %IMAGE%:latest
+            docker push %IMAGE%:%TAG%
+            docker push %IMAGE%:latest
+          """
+        }
       }
     }
   }
+
   post {
-    success { echo 'Build OK' }
-    failure { echo 'Build KO' }
+    success { echo 'Build+Test+Push OK' }
+    failure { echo 'Build/Tests/Push KO' }
   }
 }
